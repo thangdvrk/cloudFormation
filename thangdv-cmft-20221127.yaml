@@ -1,0 +1,178 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: 'Thangdv test CloudFront'
+
+Parameters:
+  
+  Region:
+    Type: String 
+    Default: ap-northeast-1
+
+  BucketName:
+    Type: String 
+    Default: d-s3-sg-fe-primary-thangdv
+
+  IAMRoleForProviderFE:
+    Type: String
+
+  AppName:
+    Description:  Application environment name.
+    Type:         String
+    Default:      "thangdv-cloudfront"
+
+  IPV6Enabled:
+    Description:    Should CloudFront to respond to IPv6 DNS requests with an IPv6 address for your distribution.
+    Type:           String
+    Default:        "false"
+    AllowedValues:
+      - true
+      - false
+
+  Compress:
+    Description:    CloudFront Origin Protocol Policy to apply to your origin.
+    Type:           String
+    Default:        "false"
+    AllowedValues:
+      - true
+      - false
+
+  DefaultTTL:
+    Description:    The default time in seconds that objects stay in CloudFront caches before CloudFront forwards another request to your custom origin. By default, AWS CloudFormation specifies 86400 seconds (one day).
+    Type:           String
+    Default:        "0"
+
+  MaxTTL:
+    Description:    The maximum time in seconds that objects stay in CloudFront caches before CloudFront forwards another request to your custom origin. By default, AWS CloudFormation specifies 31536000 seconds (one year).
+    Type:           String
+    Default:        "0"
+
+  MinTTL:
+    Description:    The minimum amount of time that you want objects to stay in the cache before CloudFront queries your origin to see whether the object has been updated.
+    Type:           String
+    Default:        "0"
+
+  QueryString:
+    Description:    CIndicates whether you want CloudFront to forward query strings to the origin that is associated with this cache behavior.
+    Type:           String
+    Default:        "true"
+    AllowedValues:
+      - true
+      - false
+
+  ForwardCookies:
+    Description:    Forwards specified cookies to the origin of the cache behavior.
+    Type:           String
+    Default:        "all"
+    AllowedValues:
+      - all
+      - whitelist
+      - none
+
+  PriceClass:
+    Description:    The price class that corresponds with the maximum price that you want to pay for CloudFront service. If you specify PriceClass_All, CloudFront responds to requests for your objects from all CloudFront edge locations.
+    Type:           String
+    Default:        "PriceClass_All"
+    AllowedValues:
+      - PriceClass_All
+      - PriceClass_100
+      - PriceClass_200
+
+  SslSupportMethod:
+    Description:    Specifies how CloudFront serves HTTPS requests.
+    Type:           String
+    Default:        "sni-only"
+    AllowedValues:
+      - sni-only
+      - vip
+
+Resources:
+
+# OriginAccessIdentity
+  OriginAccessIdentity:
+    Type: AWS::CloudFront::CloudFrontOriginAccessIdentity
+    Properties:
+      CloudFrontOriginAccessIdentityConfig:
+        Comment: !Sub Static assets in ${AWS::StackName}
+
+# S3 BUCKET
+  Bucket:
+    DeletionPolicy: Retain
+    Type: 'AWS::S3::Bucket'
+    Description: Creating Amazon S3 bucket from CloudFormation
+    Properties:
+      BucketName: !Sub '${BucketName}'
+      AccessControl: PublicRead
+      WebsiteConfiguration:
+        IndexDocument: index.html
+        ErrorDocument: index.html
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+      VersioningConfiguration:
+        Status: Enabled
+
+# S3 BUCKET POLICY
+  S3BucketPolicy:
+    Type: "AWS::S3::BucketPolicy"
+    Properties:
+      Bucket: !Ref Bucket
+      PolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+        - Action:
+            - 's3:GetObject'
+            - 's3:PutObject'
+            - 's3:DeleteObject'
+            - 's3:ListBucket'
+          Effect: Allow
+          Resource:
+            - !Sub 'arn:aws:s3:::${BucketName}/*'
+            - !Sub 'arn:aws:s3:::${BucketName}'
+          Principal:
+            AWS:
+               - !Join ["", ['arn:aws:iam::cloudfront:user/CloudFront Origin Access Identity ', !Ref OriginAccessIdentity]]
+
+# CLOUDFRONT DISTRIBUTION
+  CloudFrontDistribution:
+    Type: 'AWS::CloudFront::Distribution'
+    Properties:
+      DistributionConfig:
+        Comment: 'Cloudfront Distribution pointing ALB Origin'
+        Origins:
+          - DomainName: !Join ['.', [!Sub '${BucketName}', 's3', !Sub '${Region}', 'amazonaws.com']]
+            Id: !Join ['', ['S3-', !Sub '${BucketName}']]
+            S3OriginConfig:
+              OriginAccessIdentity: !Sub 'origin-access-identity/cloudfront/${OriginAccessIdentity}'
+        Enabled: 'true'
+        HttpVersion: 'http2'
+        DefaultCacheBehavior:
+          AllowedMethods:
+            - GET
+            - HEAD
+            - DELETE
+            - OPTIONS
+            - PATCH
+            - POST
+            - PUT
+          TargetOriginId: !Join ['', ['S3-', !Sub '${BucketName}']]
+          Compress: !Ref 'Compress'
+          DefaultTTL: !Ref 'DefaultTTL'
+          MaxTTL: !Ref 'MaxTTL'
+          MinTTL: !Ref 'MinTTL'
+          SmoothStreaming: 'false'
+          ForwardedValues:
+            QueryString: !Ref 'QueryString'
+            Cookies:
+              Forward: !Ref 'ForwardCookies'
+          ViewerProtocolPolicy: allow-all
+        DefaultRootObject: index.html
+        PriceClass: !Ref 'PriceClass'
+        ViewerCertificate:
+          SslSupportMethod: 'sni-only'
+          AcmCertificateArn: 'arn:aws:acm:us-east-1:490580231948:certificate/4e5ae5e4-e550-4279-a33e-80263b4775e1'
+        IPV6Enabled: !Ref 'IPV6Enabled'
